@@ -29,5 +29,5 @@ smart-market-intelligence/
 
 ## 🛠️ Setup Instructions
 ```bash
-git clone https://github.com/YOUR_USERNAME/smart-market-intelligence.git
+git clone https://github.com/SahilGarg15/smart-market-intelligence.git
 cd smart-market-intelligence
