@@ -19,12 +19,13 @@ Smart-Market-Intelligence-Platform/
 │ ├── raw/ # Original unprocessed dataset(s)
 │ └── processed/ # Cleaned and transformed datasets
 │
-├── visuals/ # Saved plots, charts, and dashboards
+├── report/
+    ├── visuals/ # Saved plots, charts, and dashboards
+    └── insights.md # Key findings & observations
 │
-├── 01_data_exploration.ipynb # Initial dataset exploration & understanding
+├── 01_data_setup_eda.ipynb # Initial dataset exploration & understanding
 ├── 02_data_cleaning_analysis.ipynb # Cleaning, preprocessing & deeper analysis
 │
-├── insights.md # Key findings & observations
 ├── README.md # Project documentation
 
 ---
