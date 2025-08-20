@@ -10,17 +10,57 @@ The goal is to provide insights into market trends, competitor strategies, and c
 - Feature engineering for market insights  
 - Visualizations & dashboards  
 - Predictive analytics (future scope)  
+# Smart Market Intelligence Platform
 
 ## 📂 Project Structure
-smart-market-intelligence/
+Smart-Market-Intelligence-Platform/
+│
 ├── data/
-│ ├── raw/ # original dataset
-│ └── processed/ # cleaned dataset (later)
-├── notebooks/
-│ └── 01_setup_eda.ipynb
-├── src/ # Python scripts (later)
-├── README.md
-└── .gitignore
+│ ├── raw/ # Original unprocessed dataset(s)
+│ └── processed/ # Cleaned and transformed datasets
+│
+├── visuals/ # Saved plots, charts, and dashboards
+│
+├── 01_data_exploration.ipynb # Initial dataset exploration & understanding
+├── 02_data_cleaning_analysis.ipynb # Cleaning, preprocessing & deeper analysis
+│
+├── insights.md # Key findings & observations
+├── README.md # Project documentation
+
+---
+
+## 🛠️ Work Completed
+
+### ✅ Day 1 (Aug 19, 2025)
+- Added **raw dataset(s)** in `data/raw/`.
+- Created **01_data_exploration.ipynb**:
+  - Loaded dataset(s).
+  - Performed exploratory data analysis (EDA).
+  - Checked dataset shape, column details, missing values, duplicates, and initial descriptive statistics.
+- Drafted **README.md** with project overview and structure.
+
+### ✅ Day 2 (Aug 20, 2025)
+- Added **02_data_cleaning_analysis.ipynb**:
+  - Handled missing values.
+  - Removed duplicates.
+  - Standardized column formats.
+  - Added further descriptive analysis.
+- Created **visuals/** folder for saving plots.
+- Created **insights.md** file to summarize findings.
+- Updated **README.md** with new structure and progress.
+
+---
+
+## 🚀 Next Steps
+- Generate visualizations and save them in `visuals/`.
+- Expand `insights.md` with visualization-based observations.
+- Start building basic dashboards for intelligence reporting.
+
+---
+
+## 👨‍💻 Author
+**Sahil Garg**  
+B.Tech Student | Aspiring Data Analyst
 
 ## 🔧 Tech Stack
 - Python (Pandas, NumPy, Scikit-learn, Matplotlib, Seaborn)
