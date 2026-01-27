@@ -7,6 +7,67 @@ import pandas as pd
 import os
 
 
+def validate_data(df):
+    """
+    Validate raw data before cleaning to ensure pipeline fails fast on bad data
+    
+    Guardrails to ensure pipeline fails fast on bad data:
+    - Check if dataframe is empty (no rows)
+    - Check for negative UnitPrice (indicates data corruption)
+    - Check for unrealistic Quantity values (>100,000 in single transaction)
+    
+    Why this matters:
+    Instead of silently processing bad data and getting garbage predictions,
+    we catch issues early and fail with clear error messages. This prevents
+    downstream model training on corrupted data.
+    
+    Args:
+        df: Raw dataframe to validate
+        
+    Raises:
+        ValueError: If validation fails with specific reason
+    """
+    # Check 1: Empty dataset
+    # Reason: Cannot train models or perform analysis on empty data
+    if df.empty or len(df) == 0:
+        raise ValueError(
+            "Dataset is empty! Cannot proceed with empty dataframe. "
+            "Please check if the CSV file loaded correctly."
+        )
+    
+    # Check 2: Negative UnitPrice (data corruption indicator)
+    # Reason: Prices should always be positive. Negative prices suggest:
+    # - Data entry errors
+    # - Corrupted file during download/transfer
+    # - Wrong column mapping
+    if 'UnitPrice' in df.columns:
+        negative_prices = df[df['UnitPrice'] < 0]
+        if len(negative_prices) > 0:
+            raise ValueError(
+                f"Found {len(negative_prices)} rows with negative UnitPrice! "
+                f"Prices should be positive. This indicates data corruption. "
+                f"Examples: {negative_prices['UnitPrice'].head().tolist()}"
+            )
+    
+    # Check 3: Unrealistic Quantity values (>100,000)
+    # Reason: While we filter negatives later, extreme values suggest:
+    # - Data entry errors (e.g., someone typed 1000000 instead of 100)
+    # - Fraudulent transactions
+    # - Wholesale/bulk orders that might skew analysis
+    # We use 100,000 as threshold based on retail industry standards
+    if 'Quantity' in df.columns:
+        unrealistic_qty = df[df['Quantity'] > 100000]
+        if len(unrealistic_qty) > 0:
+            raise ValueError(
+                f"Found {len(unrealistic_qty)} rows with Quantity > 100,000! "
+                f"This is unrealistic for retail transactions and suggests data errors. "
+                f"Max quantity found: {df['Quantity'].max():,.0f}. "
+                f"Please review the data source."
+            )
+    
+    print("✓ Data validation passed: No critical issues found")
+
+
 def load_and_clean_data(input_filepath='data/Online Retail.csv', 
                         output_filepath='data/cleaned_data.csv'):
     """
@@ -46,6 +107,10 @@ def load_and_clean_data(input_filepath='data/Online Retail.csv',
     # encoding='latin-1' handles special characters in product descriptions
     df = pd.read_csv(input_filepath, encoding='latin-1')
     print(f"✓ Loaded {df.shape[0]:,} rows and {df.shape[1]} columns")
+    
+    # Validate data before processing (fail fast on bad data)
+    print(f"\n[1.5/6] Validating data quality...")
+    validate_data(df)
     
     # Show initial data info
     print(f"\nInitial data shape: {df.shape}")

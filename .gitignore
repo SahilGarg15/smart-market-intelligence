@@ -43,6 +43,7 @@ models/*.pkl
 models/*.joblib
 models/*.h5
 models/*.pt
+models/metadata.json
 !models/README.md
 
 # ========================================

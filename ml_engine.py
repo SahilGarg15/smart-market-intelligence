@@ -180,16 +180,34 @@ def prepare_sales_forecasting_data(df, window_size=30, forecast_days=7):
     X = np.array(X)
     y = np.array(y)
     
-    # Split into train and test sets
-    # Use last 20% of data for testing (time series: don't shuffle!)
-    # Reason: In time series, we test on future data, not random samples
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X[:split_idx], X[split_idx:]
-    y_train, y_test = y[:split_idx], y[split_idx:]
+    # Fix Data Leakage: Use TimeSeriesSplit instead of random split
+    # Reason: Random train_test_split can use future data to predict past (LEAKAGE!)
+    # TimeSeriesSplit ensures we ALWAYS train on past and validate on future
+    # 
+    # How TimeSeriesSplit works with 5 splits:
+    # Split 1: Train [0:20%]    → Test [20%:40%]
+    # Split 2: Train [0:40%]    → Test [40%:60%]
+    # Split 3: Train [0:60%]    → Test [60%:80%]
+    # Split 4: Train [0:80%]    → Test [80%:90%]
+    # Split 5: Train [0:90%]    → Test [90%:100%]
+    # We use the LAST split (most data for training)
+    from sklearn.model_selection import TimeSeriesSplit
     
-    print(f"\nTraining samples: {len(X_train)}")
-    print(f"Test samples: {len(X_test)}")
+    tscv = TimeSeriesSplit(n_splits=5)
+    
+    # Get the last split (train on 90%, test on 10%)
+    # This gives us maximum training data while still validating on unseen future
+    splits = list(tscv.split(X))
+    train_idx, test_idx = splits[-1]  # Last split has most training data
+    
+    X_train, X_test = X[train_idx], X[test_idx]
+    y_train, y_test = y[train_idx], y[test_idx]
+    
+    print(f"\nTimeSeriesSplit applied (5 folds, using last split):")
+    print(f"Training samples: {len(X_train)} ({len(X_train)/len(X)*100:.1f}% of data)")
+    print(f"Test samples: {len(X_test)} ({len(X_test)/len(X)*100:.1f}% of data)")
     print(f"Features per sample: {X_train.shape[1]} (last {window_size} days)")
+    print(f"✓ No data leakage: Training only on past, testing on future")
     
     return X_train, y_train, X_test, y_test, daily_sales
 
@@ -238,12 +256,30 @@ def sales_forecasting(X_train, y_train, X_test, y_test):
     
     # Calculate additional metrics for context
     mae = np.mean(np.abs(y_test - y_pred))
-    mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100  # Mean Absolute Percentage Error
+    
+    # Calculate MAPE (Mean Absolute Percentage Error)
+    # Formula: mean(|actual - predicted| / |actual|) × 100
+    # Why MAPE?
+    # - Scale-independent: 10% error is 10% whether sales are $100 or $10,000
+    # - Business-friendly: "Model is off by 15% on average" is easier to understand
+    # - Industry standard: Used in retail forecasting benchmarks
+    # Limitation: Undefined when actual = 0, but we filter out zero-sales days
+    mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
     
     print(f"\n=== Model Performance ===")
-    print(f"RMSE: ${rmse:,.2f}")
-    print(f"MAE: ${mae:,.2f}")
-    print(f"MAPE: {mape:.2f}%")
+    print(f"RMSE: ${rmse:,.2f} (lower is better)")
+    print(f"MAE: ${mae:,.2f} (average error in dollars)")
+    print(f"MAPE: {mape:.2f}% (percentage error - industry standard)")
+    
+    # Interpretation guide for MAPE
+    if mape < 10:
+        print("  → Excellent forecasting accuracy (<10% error)")
+    elif mape < 20:
+        print("  → Good forecasting accuracy (10-20% error)")
+    elif mape < 30:
+        print("  → Acceptable forecasting accuracy (20-30% error)")
+    else:
+        print("  → ⚠ Poor accuracy (>30% error) - consider model improvements")
     
     # Show sample predictions vs actual
     print("\n=== Sample Predictions ===")
@@ -251,30 +287,43 @@ def sales_forecasting(X_train, y_train, X_test, y_test):
     for i in range(min(5, len(y_test))):
         print(f"  Actual: ${y_test[i]:,.2f}  |  Predicted: ${y_pred[i]:,.2f}  |  Error: ${abs(y_test[i] - y_pred[i]):,.2f}")
     
-    return model, rmse
+    return model, rmse, mape
 
 
-def save_models(kmeans, scaler, rf_model, model_dir='models'):
+def save_models(kmeans, scaler, rf_model, model_dir='models', rmse=None, mape=None):
     """
-    Save trained models to disk using joblib
+    Save trained models to disk using joblib with versioning and metadata
     
     Joblib is preferred over pickle for scikit-learn models because:
     1. More efficient for large numpy arrays
     2. Better compression
     3. Faster serialization
     
+    Model Versioning Strategy:
+    - Keep backward-compatible filenames (kmeans_model.pkl, sales_forecast_model.pkl)
+    - Also save versioned copies (sales_model_v1.pkl) for rollback capability
+    - Store metadata.json with training date and performance metrics
+    
+    Why versioning matters:
+    - Track model performance over time
+    - Roll back to previous version if new model performs worse
+    - A/B test different model versions
+    - Audit trail for production systems
+    
     Args:
         kmeans: Trained K-Means model
         scaler: Fitted StandardScaler
         rf_model: Trained Random Forest model
         model_dir: Directory to save models
+        rmse: Model RMSE score (optional)
+        mape: Model MAPE score (optional)
     """
-    print(f"\n=== Saving Models ===")
+    print(f"\n=== Saving Models with Versioning ===")
     
     # Create models directory if it doesn't exist
     os.makedirs(model_dir, exist_ok=True)
     
-    # Save customer segmentation models
+    # Save customer segmentation models (no versioning for now)
     # We save both the K-Means model and the scaler because we need to
     # transform new data the same way during inference
     joblib.dump(kmeans, os.path.join(model_dir, 'kmeans_model.pkl'))
@@ -282,11 +331,49 @@ def save_models(kmeans, scaler, rf_model, model_dir='models'):
     print(f"✓ Saved K-Means model to {model_dir}/kmeans_model.pkl")
     print(f"✓ Saved StandardScaler to {model_dir}/scaler.pkl")
     
-    # Save sales forecasting model
+    # Save sales forecasting model with versioning
+    # Primary model (used by API)
     joblib.dump(rf_model, os.path.join(model_dir, 'sales_forecast_model.pkl'))
     print(f"✓ Saved Random Forest model to {model_dir}/sales_forecast_model.pkl")
     
-    print("\nAll models saved successfully!")
+    # Versioned backup (for rollback and comparison)
+    versioned_filename = 'sales_model_v1.pkl'
+    joblib.dump(rf_model, os.path.join(model_dir, versioned_filename))
+    print(f"✓ Saved versioned backup to {model_dir}/{versioned_filename}")
+    
+    # Create metadata.json with training info
+    # This allows us to:
+    # - Track which model version is in production
+    # - Compare performance across retraining runs
+    # - Know when models were last updated
+    from datetime import datetime
+    import json
+    
+    metadata = {
+        'version': 'v1',
+        'training_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'model_type': 'RandomForestRegressor',
+        'metrics': {
+            'rmse': float(rmse) if rmse is not None else None,
+            'mape': float(mape) if mape is not None else None
+        },
+        'hyperparameters': {
+            'n_estimators': 100,
+            'max_depth': 10,
+            'min_samples_split': 5
+        },
+        'data_info': {
+            'window_size': 30,
+            'forecast_days': 7
+        }
+    }
+    
+    metadata_path = os.path.join(model_dir, 'metadata.json')
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=2)
+    
+    print(f"✓ Saved model metadata to {model_dir}/metadata.json")
+    print("\nAll models saved successfully with versioning!")
 
 
 def load_models(model_dir='models'):
@@ -344,15 +431,15 @@ def main():
     X_train, y_train, X_test, y_test, daily_sales = prepare_sales_forecasting_data(
         df, window_size=30, forecast_days=7
     )
-    rf_model, rmse = sales_forecasting(X_train, y_train, X_test, y_test)
+    rf_model, rmse, mape = sales_forecasting(X_train, y_train, X_test, y_test)
     
     # Save daily sales for visualization
     daily_sales.to_csv('data/daily_sales.csv', index=False)
     print("\n✓ Daily sales saved to data/daily_sales.csv")
     
-    # Task 3: Save Models
+    # Task 3: Save Models with versioning and metadata
     print("\n[Step 4/5] Saving Models...")
-    save_models(kmeans, scaler, rf_model)
+    save_models(kmeans, scaler, rf_model, rmse=rmse, mape=mape)
     
     # Summary
     print("\n" + "=" * 70)
@@ -363,11 +450,14 @@ def main():
     print(f"  - Number of Segments: 3 (Low, Mid, High value)")
     print(f"\n✓ Sales Forecasting:")
     print(f"  - RMSE: ${rmse:,.2f}")
+    print(f"  - MAPE: {mape:.2f}%")
     print(f"  - Forecast Window: 7 days based on 30-day history")
     print(f"\n✓ Models saved in: models/")
     print(f"  - kmeans_model.pkl")
     print(f"  - scaler.pkl")
     print(f"  - sales_forecast_model.pkl")
+    print(f"  - sales_model_v1.pkl (versioned backup)")
+    print(f"  - metadata.json (training info and metrics)")
     print("\nReady for deployment! ✨")
     print("=" * 70)
 

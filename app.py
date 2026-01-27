@@ -30,8 +30,45 @@ async def load_models_and_data():
     """
     Load saved models and data when the API starts
     This runs once at startup to avoid loading on every request
+    
+    Startup Check: Fail fast if models don't exist
+    Why? Better to prevent the API from starting than to serve 503 errors
+    on every request. This gives clear feedback during deployment.
     """
     global kmeans_model, scaler, sales_model, daily_sales_df
+    
+    # Pre-flight check: Verify all required files exist BEFORE loading
+    # Reason: Fail fast with helpful error message instead of cryptic FileNotFoundError
+    required_files = [
+        'models/kmeans_model.pkl',
+        'models/scaler.pkl',
+        'models/sales_forecast_model.pkl',
+        'data/daily_sales.csv'
+    ]
+    
+    missing_files = [f for f in required_files if not os.path.exists(f)]
+    
+    if missing_files:
+        error_msg = (
+            "\n" + "="*70 + "\n"
+            "STARTUP FAILED: Required model files are missing!\n"
+            "="*70 + "\n"
+            f"Missing files:\n"
+        )
+        for f in missing_files:
+            error_msg += f"  ❌ {f}\n"
+        error_msg += (
+            "\nREQUIRED ACTION:\n"
+            "  1. Run: python ml_engine.py\n"
+            "  2. Wait for training to complete\n"
+            "  3. Restart this API server\n"
+            "\nWhy this check exists:\n"
+            "  Without models, the API would return 503 errors on every request.\n"
+            "  Better to fail at startup with a clear error message.\n"
+            "="*70
+        )
+        print(error_msg)
+        raise RuntimeError(error_msg)
     
     try:
         # Load customer segmentation models
@@ -50,9 +87,17 @@ async def load_models_and_data():
         daily_sales_df['Date'] = pd.to_datetime(daily_sales_df['Date'])
         print(f"✓ Daily sales data loaded ({len(daily_sales_df)} days)")
         
+        print("\n" + "="*70)
+        print("API STARTUP SUCCESSFUL - All models loaded and ready")
+        print("="*70 + "\n")
+        
     except Exception as e:
-        print(f"⚠️ Warning: Could not load models or data: {e}")
-        print("Please run ml_engine.py first to train and save models")
+        error_msg = (
+            f"\nFATAL ERROR during model loading: {e}\n"
+            "The API cannot start without models. Please run ml_engine.py first."
+        )
+        print(error_msg)
+        raise RuntimeError(error_msg)
 
 
 # Pydantic Models for Request/Response Validation
@@ -106,9 +151,10 @@ async def segment_customer(customer: CustomerInput):
     Predict customer segment based on RFM values
     
     Process:
-    1. Log-transform RFM values (reduces skewness in data)
-    2. Scale using saved scaler (standardizes features)
-    3. Predict cluster using KMeans model
+    1. Validate input values (no negatives, realistic ranges)
+    2. Log-transform RFM values (reduces skewness in data)
+    3. Scale using saved scaler (standardizes features)
+    4. Predict cluster using KMeans model
     
     Args:
         customer: CustomerInput with Recency, Frequency, Monetary
@@ -120,6 +166,33 @@ async def segment_customer(customer: CustomerInput):
         raise HTTPException(
             status_code=503,
             detail="Models not loaded. Please run ml_engine.py first."
+        )
+    
+    # Input Validation: Check for negative values
+    # Why? Negative RFM values are logically impossible:
+    # - Recency: Cannot be negative days since last purchase
+    # - Frequency: Cannot have negative number of purchases
+    # - Monetary: Cannot spend negative money (this isn't a refund API)
+    # Better to reject bad input than produce garbage predictions
+    if customer.Recency < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid input: Recency cannot be negative (got {customer.Recency}). "
+                   "Recency represents days since last purchase and must be >= 0."
+        )
+    
+    if customer.Frequency < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid input: Frequency cannot be negative (got {customer.Frequency}). "
+                   "Frequency represents number of purchases and must be >= 1."
+        )
+    
+    if customer.Monetary < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid input: Monetary cannot be negative (got {customer.Monetary}). "
+                   "Monetary represents total spend and must be >= 0."
         )
     
     try:
@@ -165,8 +238,31 @@ async def segment_customer(customer: CustomerInput):
             }
         )
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors) as-is
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+        # Catch unexpected errors and log them
+        # Why detailed error messages?
+        # - Helps debug issues in production
+        # - Distinguishes between model errors vs data errors
+        # - Provides context for monitoring/alerting systems
+        import traceback
+        error_details = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "input_values": {
+                "Recency": customer.Recency,
+                "Frequency": customer.Frequency,
+                "Monetary": customer.Monetary
+            }
+        }
+        print(f"Segmentation error: {error_details}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction error: {str(e)}. Check API logs for details."
+        )
 
 
 @app.get("/forecast/{days}", response_model=ForecastResponse)
@@ -185,8 +281,15 @@ async def forecast_sales(days: int = 7):
     previously predicted values. This is necessary because we don't have 
     future actual data, so we use our own predictions as inputs.
     
+    Forecast Horizon Limit: Maximum 30 days
+    Why? Prediction errors compound in sliding window approach:
+    - Day 1: Uses 100% actual data
+    - Day 15: Uses 50% actual, 50% predicted
+    - Day 30: Uses 0% actual, 100% predicted (high uncertainty!)
+    Beyond 30 days, errors accumulate exponentially and predictions become unreliable.
+    
     Args:
-        days: Number of days to forecast (default 7)
+        days: Number of days to forecast (1-30, default 7)
         
     Returns:
         List of predictions with dates and predicted sales
@@ -197,10 +300,27 @@ async def forecast_sales(days: int = 7):
             detail="Model or data not loaded. Please run ml_engine.py first."
         )
     
-    if days < 1 or days > 30:
+    # Input Validation: Limit forecast horizon to 30 days
+    # Why this specific limit?
+    # 1. Model trained on 30-day windows (expects 30 features)
+    # 2. Sliding window error compounds: each prediction uses previous predictions
+    # 3. Beyond 30 days, we're predicting entirely from predicted data (unreliable)
+    # 4. Industry best practice: Don't forecast beyond 1 month for daily retail sales
+    if days < 1:
         raise HTTPException(
             status_code=400,
-            detail="Days must be between 1 and 30"
+            detail=f"Invalid forecast horizon: {days} days. Minimum is 1 day."
+        )
+    
+    if days > 30:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid forecast horizon: {days} days exceeds maximum of 30 days. "
+                "Why this limit? Prediction errors compound in the sliding window approach. "
+                "Beyond 30 days, forecasts use only predicted data (no actual sales), "
+                "making them highly unreliable. For longer forecasts, consider monthly aggregation."
+            )
         )
     
     try:
@@ -242,8 +362,33 @@ async def forecast_sales(days: int = 7):
             predictions=predictions
         )
         
+    except HTTPException:
+        # Re-raise HTTP exceptions (validation errors) as-is
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Forecast error: {str(e)}")
+        # Catch unexpected errors with detailed context
+        # Why comprehensive error handling?
+        # - Forecasting can fail due to data issues (NaN values, missing dates)
+        # - Model errors (corrupted .pkl file, version mismatch)
+        # - Numerical errors (overflow, underflow in calculations)
+        # We want to know WHICH type of error occurred for debugging
+        import traceback
+        error_details = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "forecast_days": days,
+            "data_available": len(daily_sales_df) if daily_sales_df is not None else 0
+        }
+        print(f"Forecast error: {error_details}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Forecast generation failed: {str(e)}. "
+                "This could be due to insufficient historical data or model issues. "
+                "Check API logs for details."
+            )
+        )
 
 
 @app.get("/health")
