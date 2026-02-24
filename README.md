@@ -1,691 +1,344 @@
-# 📊 Smart Market Intelligence Platform
+# Smart Market Intelligence Platform
 
-**Tech Stack**: Python | Pandas | Scikit-Learn | FastAPI | Streamlit
+**Tech Stack**: Python 3.14 · FastAPI · Streamlit · Scikit-Learn · PostgreSQL (Neon) · Plotly
 
-A complete machine learning platform for retail analytics featuring customer segmentation, sales forecasting, REST API, and interactive dashboard.
-
----
-
-## 🎯 Project Overview
-
-This platform demonstrates end-to-end ML pipeline development:
-- **Phase 1**: Data loading and preprocessing with validation
-- **Phase 2**: ML model training (K-Means + Random Forest) with proper time-series splitting
-- **Phase 3**: RESTful API deployment (FastAPI) with robust error handling
-- **Phase 4**: Interactive web dashboard (Streamlit)
-
-### **Key Features:**
-- ✅ **Customer Segmentation**: RFM-based K-Means clustering
-- ✅ **Sales Forecasting**: Random Forest regression with lag features
-- ✅ **REST API**: FastAPI endpoints for real-time predictions
-- ✅ **Dashboard**: Streamlit interface with Plotly visualizations
-- ✅ **Data Validation**: Fail-fast guardrails for corrupted data
-- ✅ **No Data Leakage**: TimeSeriesSplit for proper time-series validation
-- ✅ **Model Versioning**: Timestamped models with metadata tracking
-- ✅ **Production-Ready**: Input validation, error handling, startup checks
-- ✅ **Well-Documented**: Extensive comments explaining each step
+An end-to-end retail ML platform covering data validation, RFM customer segmentation, multi-model sales forecasting, a REST API with cloud persistence, and an interactive dashboard — all built as a clean, modular v2 pipeline.
 
 ---
 
-## 📁 Project Structure
+## Architecture
+
+```
+Raw CSV
+  │
+  ▼
+pipeline/data_validation.py       ← fail-fast guardrails
+pipeline/feature_engineering.py   ← RFM + lag/rolling features
+pipeline/model_benchmark.py        ← Linear · Ridge · Random Forest × TimeSeriesSplit
+pipeline/hyperparameter_tuning.py  ← GridSearchCV on best candidate
+pipeline/model_selection.py        ← select by MAPE, retrain on full data, export
+pipeline/error_analysis.py         ← feature importance + residual charts
+  │
+  ├─► models/best_model.pkl
+  ├─► models/metadata.json
+  └─► analysis/*.png
+         │
+         ▼
+   api/app.py  (FastAPI)              dashboard.py  (Streamlit)
+         │
+         ▼
+   db/  (Neon PostgreSQL)
+   prediction_logs table
+```
+
+---
+
+## Project Structure
 
 ```
 market-intel/
-├── data/                          # Dataset folder
-│   ├── Online Retail.csv          # Original dataset (place here)
-│   ├── cleaned_data.csv           # Cleaned data (auto-generated)
-│   ├── daily_sales.csv            # Aggregated sales (auto-generated)
-│   └── customer_segments.csv      # RFM segments (auto-generated)
-├── models/                        # Trained ML models (auto-generated)
-│   ├── kmeans_model.pkl           # Customer segmentation
-│   ├── scaler.pkl                 # Feature scaler
-│   ├── sales_forecast_model.pkl   # Sales predictor
-│   ├── sales_model_v1.pkl         # Versioned backup (NEW)
-│   └── metadata.json              # Training metadata (NEW)
-├── utils/                         # Utility modules
-│   └── data_loader.py             # Phase 1: Data loading & cleaning with validation
-├── ml_engine.py                   # Phase 2: ML training pipeline (TimeSeriesSplit)
-├── app.py                         # Phase 3: FastAPI backend (robust error handling)
-├── dashboard.py                   # Phase 4: Streamlit frontend
-├── requirements.txt               # Python dependencies
-├── MODEL_LIMITATIONS.md           # Known issues & improvements
-├── LIMITATIONS_FOR_REPORT.md      
-└── README.md                      # This file
+│
+├── pipeline/                          # Training pipeline (6 modules)
+│   ├── data_validation.py             # Load CSV + 4 fail-fast guardrails
+│   ├── feature_engineering.py         # RFM, daily aggregation, lag/rolling features
+│   ├── model_benchmark.py             # Benchmark 3 models with TimeSeriesSplit
+│   ├── hyperparameter_tuning.py       # GridSearchCV on Random Forest
+│   ├── model_selection.py             # Pick best by MAPE, serialize model
+│   ├── error_analysis.py              # Feature importance + residual analysis
+│   └── __init__.py
+│
+├── api/
+│   ├── app.py                         # FastAPI — /health /predict /drift /benchmark /metadata
+│   └── __init__.py
+│
+├── db/
+│   ├── db_config.py                   # SQLAlchemy engine + Neon connection pool
+│   ├── db_models.py                   # PredictionLog ORM table
+│   ├── db_logger.py                   # log_prediction() + get_recent_predictions()
+│   └── __init__.py
+│
+├── utils/
+│   └── data_loader.py                 # Legacy v1 helper (kept for reference)
+│
+├── data/
+│   ├── Online Retail.csv              # Source dataset — place here before running
+│   ├── cleaned_data.csv               # Auto-generated after pipeline
+│   ├── daily_sales.csv                # Auto-generated after pipeline
+│   ├── customer_segments.csv          # Auto-generated after pipeline
+│   └── README.md
+│
+├── models/
+│   ├── best_model.pkl                 # Primary model loaded by the API
+│   ├── sales_model_v1.pkl             # Versioned backup for rollback
+│   ├── kmeans_model.pkl               # Customer segmentation model
+│   ├── scaler.pkl                     # RFM StandardScaler
+│   ├── benchmark_results.json         # Per-model CV metrics
+│   ├── metadata.json                  # Full training audit record
+│   └── README.md
+│
+├── analysis/
+│   ├── feature_importance.png         # Top-10 feature importances
+│   └── residual_distribution.png      # Residual histogram
+│
+├── pipeline_notebook.ipynb            # Interactive step-by-step notebook
+├── run_pipeline.py                    # One-shot pipeline runner script
+├── dashboard.py                       # Streamlit dashboard
+├── requirements.txt                   # Pinned Python dependencies
+├── .env                               # DATABASE_URL — never committed
+├── .env.example                       # Template for .env
+├── .gitignore
+└── README.md
 ```
 
 ---
 
-## 🚀 Quick Start Guide
+## Quickstart
 
-### **Prerequisites**
-- Python 3.8 or higher
-- pip package manager
-- 500MB free disk space
+### 1. Environment Setup
 
-### **Step 1: Clone & Setup**
-
-```bash
-# Navigate to project directory
+```powershell
 cd market-intel
-
-# Create virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+.\venv\Scripts\activate
+pip install -r requirements.txt --no-cache-dir
 ```
 
-### **Step 2: Download Dataset**
+> **Python 3.14 note**: If you see ABI mismatch errors on import, add `--force-reinstall` to the pip command. This affects pre-compiled wheels (numpy, pandas, pyarrow, pydantic-core) when newer Python releases are ahead of wheel availability.
 
-Download the **Online Retail Dataset** from [UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/online+retail):
-- **Direct link**: https://archive.ics.uci.edu/ml/machine-learning-databases/00352/Online%20Retail.xlsx
-- Convert to CSV format (Excel → Save As → CSV)
-- Save as `data/Online Retail.csv`
+### 2. Configure Database
 
-**Expected columns:**
-- InvoiceNo, StockCode, Description, Quantity, InvoiceDate, UnitPrice, CustomerID, Country
+Copy `.env.example` to `.env` and fill in your PostgreSQL connection string:
 
-### **Step 3: Run Phase 1 - Data Cleaning**
-
-```bash
-python utils/data_loader.py
+```
+DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
 ```
 
-**Output:**
-- `data/cleaned_data.csv` - Cleaned dataset
-- Console summary of data quality
+A free Neon serverless PostgreSQL instance works out of the box: https://neon.tech
 
-**What it does:**
-- **Validates data** (fails fast on empty/corrupted data)
-- Removes rows with missing CustomerID
-- Filters out negative quantities (returns)
-- Creates TotalAmount column
-- Converts dates to datetime format
+### 3. Download Dataset
 
-### **Step 4: Run Phase 2 - Train ML Models**
+Save the UCI Online Retail dataset as `data/Online Retail.csv`:
 
-```bash
-python ml_engine.py
-```
+- Direct download: https://archive.ics.uci.edu/ml/machine-learning-databases/00352/Online%20Retail.xlsx
+- Open in Excel → File → Save As → CSV UTF-8
 
-**Output:**
-- `models/kmeans_model.pkl`, `models/scaler.pkl`, `models/sales_forecast_model.pkl`
-- `models/sales_model_v1.pkl` (versioned backup)
-- `models/metadata.json` (training date, metrics, hyperparameters)
-- `data/daily_sales.csv`, `data/customer_segments.csv`
-- Training metrics in console
-
-**What it does:**
-- Creates RFM features (Recency, Frequency, Monetary)
-- Trains K-Means clustering (3 customer segments)
-- Calculates Silhouette Score for cluster quality
-- Aggregates sales by day
-- **Uses TimeSeriesSplit** (5 folds, no data leakage!)
-- Trains Random Forest for sales prediction
-- Reports **RMSE** (dollar error) and **MAPE** (percentage error)
-- **Saves versioned models** with metadata for rollback capability
-
-### **Step 5: Run Phase 3 - Start API Server**
-
-```bash
-python app.py
-```
-
-Or with uvicorn:
-```bash
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
-```
-
-**Endpoints:**
-- 🌐 API Docs: http://localhost:8000/docs
-- ✅ Health Check: `GET /health`
-- 📊 Customer Segment: `POST /segment`
-- 📈 Sales Forecast: `GET /forecast/{days}`
-
-**New Production Features:**
-- 🔒 **Startup Validation**: Fails if models missing (clear error message)
-- ✅ **Input Validation**: Rejects negative RFM values, limits forecast to 30 days
-- 🛡️ **Error Handling**: Try-catch blocks with detailed error logging
-- 📊 **Health Endpoint**: Check model loading status
-
-**Test with curl:**
-```bash
-# Segment a customer
-curl -X POST "http://localhost:8000/segment" \
-  -H "Content-Type: application/json" \
-  -d '{"Recency": 30, "Frequency": 5, "Monetary": 250.50}'
-
-# Forecast next 7 days
-curl http://localhost:8000/forecast/7
-```
-
-### **Step 6: Run Phase 4 - Launch Dashboard**
-
-```bash
-streamlit run dashboard.py
-```
-
-**Dashboard URL**: http://localhost:8501
-
-**Features:**
-- 📊 **Business Overview Tab**:
-  - Key metrics (Total Revenue, Avg Daily Sales, Customer Count)
-  - Daily sales trend chart
-  - Customer segment distribution pie chart
-  - Segment statistics table
-
-- 🔮 **Prediction Lab Tab**:
-  - Interactive customer segmentation with RFM sliders
-  - Sales forecasting with customizable days
-  - Real-time API integration
-  - Visual predictions with Plotly charts
+Expected columns: `InvoiceNo, StockCode, Description, Quantity, InvoiceDate, UnitPrice, CustomerID, Country`
 
 ---
 
-## 🏗️ MLOps Best Practices (Production Enhancements)
+## Running the Pipeline
 
-### **1. Data Validation Layer**
-**File**: `utils/data_loader.py`
+### Option A — One-shot script
 
-```python
-def validate_data(df):
-    # Fail fast on:
-    # - Empty dataframes
-    # - Negative UnitPrice (data corruption)
-    # - Unrealistic Quantity >100,000 (data errors)
+```powershell
+.\venv\Scripts\python.exe run_pipeline.py
 ```
 
-**Why?** Prevents training models on corrupted data, provides clear error messages early in the pipeline.
+Runs all 6 pipeline steps sequentially, prints progress to console, and writes all artefacts to `models/` and `analysis/`.
 
-### **2. No Data Leakage - TimeSeriesSplit**
-**File**: `ml_engine.py`
-
-```python
-from sklearn.model_selection import TimeSeriesSplit
-tscv = TimeSeriesSplit(n_splits=5)
-# Always train on past, test on future ✓
+**Typical output:**
+```
+[1/6] Data Validation ...   541,909 rows loaded, 4 guardrails passed
+[2/6] Feature Engineering ...   406,829 clean rows, 374 daily rows x 16 features
+[3/6] Model Benchmark ...
+        Linear       MAPE=14.08%  RMSE=6,274  R2=0.791
+        Ridge        MAPE=13.08%  RMSE=6,293  R2=0.788   <-- best
+        RandomForest MAPE=14.74%  RMSE=8,528  R2=0.599
+[4/6] Hyperparameter Tuning ...   best RF params found
+[5/6] Model Selection ...   Ridge selected, retrained on full data
+[6/6] Error Analysis ...   charts saved to analysis/
+Pipeline complete in ~17 s
 ```
 
-**Before**: Random `train_test_split` could use future data to predict past (LEAKAGE!)  
-**After**: TimeSeriesSplit ensures chronological split (train on 90%, test on 10%)
+### Option B — Interactive Notebook
 
-### **3. MAPE Metrics**
-**File**: `ml_engine.py`
+Open `pipeline_notebook.ipynb` in VS Code and run cells one by one. Each cell produces inline Plotly charts and printed summaries.
 
-```python
-mape = np.mean(np.abs((y_test - y_pred) / y_test)) * 100
-# Industry-standard percentage error metric
-```
-
-**Why?** Scale-independent (10% error is 10% whether sales are $100 or $10,000). Business-friendly metric.
-
-### **4. Model Versioning**
-**File**: `ml_engine.py`
-
-```python
-# Saves:
-# - sales_forecast_model.pkl (primary)
-# - sales_model_v1.pkl (versioned backup)
-# - metadata.json (training date, RMSE, MAPE, hyperparameters)
-```
-
-**Benefits:**
-- Track model performance over time
-- Rollback to previous version if new model performs worse
-- A/B test different model versions
-- Audit trail for production systems
-
-### **5. Robust API Error Handling**
-**File**: `app.py`
-
-```python
-# Startup validation
-if missing_files:
-    raise RuntimeError("Models not found! Run ml_engine.py first.")
-
-# Input validation
-if days > 30:
-    raise HTTPException(400, "Max 30 days (error compounds!)")
-
-# Error logging
-except Exception as e:
-    print(f"Error: {error_details}")
-    raise HTTPException(500, "Forecast failed. Check logs.")
-```
-
-**Why?** Production APIs must fail gracefully with clear messages, not cryptic stack traces.
+| Cell | Content |
+|------|---------|
+| 1 | Imports + environment check |
+| 2 | Load & validate raw data |
+| 3 | Clean & preprocess |
+| 4 | RFM feature engineering |
+| 5 | K-Means customer segmentation (pie chart) |
+| 6 | Daily sales aggregation + lag/rolling features (trend chart) |
+| 7 | Benchmark 3 models with TimeSeriesSplit (table) |
+| 8 | Evaluation charts — actual vs predicted, residuals, feature importance |
+| 9 | Model versioning + metadata export |
+| 10 | Live API testing — requires server running (see below) |
 
 ---
 
-## 🧠 Technical Details
+## Running the Full Stack
 
-### **Customer Segmentation**
+Open three terminals simultaneously:
 
-**Algorithm**: K-Means Clustering  
-**Features**: RFM (Recency, Frequency, Monetary)  
-**Preprocessing**: Log transformation + StandardScaler
+**Terminal 1 — API server**
+```powershell
+.\venv\Scripts\python.exe -m uvicorn api.app:app --reload
+```
+API base: http://127.0.0.1:8000  
+Swagger UI: http://127.0.0.1:8000/docs
 
-**Segments:**
-- **Loyal**: Low recency, high frequency/monetary
-- **At-Risk**: High recency, low frequency
-- **Whale**: Very high monetary value
+**Terminal 2 — Dashboard**
+```powershell
+.\venv\Scripts\python.exe -m streamlit run dashboard.py
+```
+Dashboard: http://localhost:8501
 
-**Why K-Means?**
-- Industry standard for RFM segmentation
-- Fast and scalable
-- Easy to interpret for business stakeholders
-
-**Evaluation Metric**: Silhouette Score (0-1, higher is better)
-
-### **Sales Forecasting**
-
-**Algorithm**: Random Forest Regressor  
-**Features**:
-- Temporal: Year, Month, Day, DayOfWeek, Quarter, DayOfYear, WeekOfYear
-- Context: NumTransactions, NumCustomers, TotalQuantity
-- Lag: Previous day sales, same day last week
-- Trend: 7-day moving average
-
-**Why Random Forest?**
-- Handles non-linear patterns (sales curves)
-- Robust to outliers (holiday spikes)
-- Provides feature importance
-- No extensive feature engineering needed
-
-**Evaluation Metrics**:
-- **RMSE** (Root Mean Squared Error): Average error in dollars
-- **MAE** (Mean Absolute Error): Average absolute error
-- **MAPE** (Mean Absolute Percentage Error): Industry-standard percentage error
-- **R²** (R-squared): Variance explained (0-1, higher is better)
-
-**Training Method**: TimeSeriesSplit with 5 folds (no data leakage)
-
-**Prediction Method**: Sliding window (uses previous predictions as inputs for future days)
+**Terminal 3 — Notebook** *(optional, for notebook cell 10)*
+> The API must be running before executing notebook cell 10.
 
 ---
 
-## 📊 Dataset Information
+## API Reference
 
-**Source**: [UCI Machine Learning Repository - Online Retail Dataset](https://archive.ics.uci.edu/ml/datasets/online+retail)
+Base URL: `http://127.0.0.1:8000`
 
-**Description**: Transactional data from UK-based online retail company (2010-2011)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Model version, DB status, API version |
+| `POST` | `/predict` | Sales forecast for N days |
+| `GET` | `/benchmark` | Per-model CV results (RMSE, MAPE, R²) |
+| `GET` | `/metadata` | Full training audit record |
+| `GET` | `/drift` | Rolling mean vs training baseline |
 
-**Size**: ~540,000 transactions, ~4,300 customers
+### POST /predict
 
-**Attributes**:
-- InvoiceNo: Invoice number (unique per transaction)
-- StockCode: Product code
-- Description: Product name
-- Quantity: Quantity purchased
-- InvoiceDate: Date and time of transaction
-- UnitPrice: Price per unit
-- CustomerID: Unique customer identifier
-- Country: Customer's country
+```json
+// Request
+{ "days": 7 }
 
----
-
-
-## 🎓 Learning Outcomes
-
-By completing this project, you will demonstrate:
-
-1. **Data Engineering**: Loading, cleaning, and transforming real-world messy data
-2. **Feature Engineering**: Creating RFM features, temporal features, lag features
-3. **Unsupervised Learning**: K-Means clustering for customer segmentation
-4. **Supervised Learning**: Random Forest regression for time-series forecasting
-5. **Model Evaluation**: Understanding MAE, RMSE, R², Silhouette Score
-6. **API Development**: Building production-ready REST APIs with FastAPI
-7. **Web Development**: Creating interactive dashboards with Streamlit
-8. **Software Engineering**: Project structure, version control, documentation
-
----
-
-## 🎤 Interview Preparation
-
-### **Common Questions & Answers:**
-
-**Q: Why did you remove rows with missing CustomerIDs?**  
-A: CustomerID is essential for RFM analysis and segmentation. We can't impute it because it's a unique identifier, not a feature we can predict.
-
-**Q: Why use StandardScaler for K-Means?**  
-A: K-Means uses Euclidean distance. Without scaling, high-value features (Monetary in $1000s) would dominate low-value features (Recency in days), creating biased clusters.
-
-**Q: How did you prevent data leakage in time-series forecasting?**  
-A: I replaced random `train_test_split` with `TimeSeriesSplit` (5 folds). This ensures we ALWAYS train on past data and validate on future data, preventing the model from "seeing the future" during training.
-
-**Q: What is MAPE and why is it important?**  
-A: MAPE (Mean Absolute Percentage Error) is a scale-independent metric: `mean(|actual - pred| / |actual|) × 100`. A 10% error means the same thing whether sales are $100 or $10,000. It's an industry-standard metric that business stakeholders understand better than RMSE.
-
-**Q: How do you handle model versioning?**  
-A: I save both `sales_forecast_model.pkl` (current production model) and `sales_model_v1.pkl` (timestamped backup). I also create `metadata.json` with training date, RMSE, MAPE, and hyperparameters. This allows rollback if a new model performs worse and provides an audit trail.
-
-**Q: What production safeguards did you implement in the API?**  
-A: Three layers: (1) **Startup validation** - API refuses to start if model files are missing, (2) **Input validation** - Reject negative RFM values and limit forecast to 30 days, (3) **Error handling** - Try-catch blocks with detailed logging for debugging production issues.
-
----
-
-## 📝 Usage Examples
-
-### **API Examples**
-
-```bash
-# Customer Segmentation
-curl -X POST "http://localhost:8000/segment" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Recency": 10,
-    "Frequency": 15,
-    "Monetary": 2500.50
-  }'
-
-# Response:
+// Response
 {
-  "cluster_id": 0,
-  "segment_name": "Loyal",
-  "rfm_input": {"Recency": 10, "Frequency": 15, "Monetary": 2500.50}
-}
-
-# Sales Forecast
-curl http://localhost:8000/forecast/7
-
-# Response:
-{
+  "model_version": "v2-Ridge-2026-02-24",
   "forecast_days": 7,
-  "predictions": [
-    {"date": "2011-12-10", "predicted_sales": 15234.56},
-    {"date": "2011-12-11", "predicted_sales": 14987.32},
-    ...
-  ]
+  "avg_prediction": 32377.13,
+  "request_latency_ms": 7.3,
+  "forecast_values": [31200.0, 33450.0, 34100.0, 29800.0, 28600.0, 35100.0, 33900.0]
 }
 ```
 
-### **Python Examples**
+### GET /drift
 
-```python
-import requests
-
-# Segment a customer
-response = requests.post(
-    "http://localhost:8000/segment",
-    json={"Recency": 30, "Frequency": 5, "Monetary": 250.50}
-)
-print(response.json())
-
-# Get 14-day forecast
-forecast = requests.get("http://localhost:8000/forecast/14")
-print(forecast.json())
-```
-
----
-
-## 🛠️ Troubleshooting
-
-### **Issue: Dataset not found**
-```
-FileNotFoundError: data/Online Retail.csv
-```
-**Solution**: Download the dataset and place it in `data/` folder (see Step 2)
-
-### **Issue: API returns 503 Service Unavailable**
-```
-{"detail": "Models not loaded"}
-```
-**Solution**: Run `python ml_engine.py` first to train and save models
-
-### **Issue: Dashboard shows "Data not available"**
-```
-Warning: Data not available. Please run ml_engine.py first.
-```
-**Solution**: Run Phase 2 (`python ml_engine.py`) to generate required CSV files
-
-### **Issue: ModuleNotFoundError**
-```
-ModuleNotFoundError: No module named 'fastapi'
-```
-**Solution**: Install dependencies with `pip install -r requirements.txt`
-
-### **Issue: Port already in use**
-```
-ERROR: [Errno 48] Address already in use
-```
-**Solution**: Change port or kill existing process:
-```bash
-# Change port
-uvicorn app:app --port 8001
-
-# Or kill existing process (Linux/Mac)
-lsof -ti:8000 | xargs kill -9
-```
-
----*Recency**: Days since last purchase
-- **Frequency**: Number of purchases
-- **Monetary**: Total amount spent
-
-**Why K-Means?**
-- Simple and interpretable
-- Works well with numerical features
-- Industry standard for RFM segmentation
-
-**Preprocessing:**
-- StandardScaler to normalize features (mean=0, std=1)
-- Prevents high-value monetary amounts from dominating
-
-### Sales Prediction
-
-**Algorithm**: Random Forest Regressor  
-**Features**:
-- Temporal: Year, Month, Day, DayOfWeek, Quarter, etc.
-- Lag features: Previous day sales, same day last week
-- Rolling averages: 7-day moving average
-- Context: Number of transactions, customers, quantity
-
-**Why Random Forest?**
-- Handles non-linear patterns (sales don't follow straight lines)
-- Robust to outliers (holiday spikes, slow days)
-- Provides feature importance (what drives sales?)
-- No extensive feature engineering needed
-
-**Evaluation Metrics:**
-- **MAE** (Mean Absolute Error): Average prediction error in dollars
-- **RMSE** (Root Mean Squared Error): Penalizes large errors
-- **R²** (R-squared): How much variance is explained (1.0 = perfect)
-
-## 📊 Key Insights for Interview
-
-### Why this tech stack?
-
-- **Pandas**: Standard for data manipulation in Python
-- **Scikit-learn**: Industry-standard ML library, simple API
-- **FastAPI**: Modern, fast API framework with auto-documentation
-- **Streamlit**: Quick prototyping of data apps without HTML/CSS/JS
-
-### Design Decisions
-
-1. **RFM for Segmentation**: Proven marketing framework, easy to explain
-2. **Random Forest over Linear Models**: Captures complex patterns in retail data
-3. **Lag Features**: Yesterday's sales help predict today's (temporal dependency)
-4. **Data Cleaning**: Removed cancelled orders, negative prices (data quality)
-5. **Train/Test Split**: 80/20 to evaluate generalization
-
-### Common Interview Questions
-
-**Q: Why remove missing CustomerIDs?**  
-A: We need CustomerID for segmentation. Cannot impute because they're unique identifiers.
-
-**Q: Why standardize features for K-Means?**  
-A: K-Means uses Euclidean distance. Without scaling, large-scale features (e.g., Monetary in $1000s) dominate small-scale features (e.g., Recency in days).
-
-**Q: How do you handle overfitting?**  
-A: For Random Forest, I limit max_depth and min_samples_split. Ideally, I would implement k-fold cross-validation and hyperparameter tuning with GridSearchCV.
-
-**Q: Why Random Forest over Linear Regression?**  
-A: Sales data has non-linear patterns (weekend spikes, seasonal trends). Random Forest captures these complex relationships without manual feature engineering, and it's robust to outliers.
-
----
-
-## 📝 Usage Examples
-
-### **API Examples**
-
-```bash
-# Customer Segmentation
-curl -X POST "http://localhost:8000/segment" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "Recency": 10,
-    "Frequency": 15,
-    "Monetary": 2500.50
-  }'
-
-# Response:
+```json
 {
-  "cluster_id": 0,
-  "segment_name": "Loyal",
-  "rfm_input": {"Recency": 10, "Frequency": 15, "Monetary": 2500.50}
+  "training_mean": 29368.57,
+  "rolling_mean_50": 31200.40,
+  "drift_pct": 6.24,
+  "drift_flag": false
 }
+```
 
-# Sales Forecast
-curl http://localhost:8000/forecast/7
+`drift_flag` is `true` when `|drift_pct| > 20%` — indicating the live distribution has shifted significantly from training data.
 
-# Response:
+### GET /benchmark
+
+```json
 {
-  "forecast_days": 7,
-  "predictions": [
-    {"date": "2011-12-10", "predicted_sales": 15234.56},
-    {"date": "2011-12-11", "predicted_sales": 14987.32},
-    ...
-  ]
+  "Linear":       { "RMSE": 6274.73, "MAPE": 14.08, "R2": 0.7912 },
+  "Ridge":        { "RMSE": 6292.69, "MAPE": 13.08, "R2": 0.7878 },
+  "RandomForest": { "RMSE": 8528.42, "MAPE": 14.74, "R2": 0.5989 }
 }
 ```
 
-### **Python Examples**
+---
 
-```python
-import requests
+## Database Schema
 
-# Segment a customer
-response = requests.post(
-    "http://localhost:8000/segment",
-    json={"Recency": 30, "Frequency": 5, "Monetary": 250.50}
-)
-print(response.json())
+Every `/predict` call is persisted to Neon PostgreSQL (`prediction_logs`):
 
-# Get 14-day forecast
-forecast = requests.get("http://localhost:8000/forecast/14")
-print(forecast.json())
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | SERIAL PK | Auto-increment |
+| `timestamp` | TIMESTAMPTZ | UTC request time |
+| `forecast_days` | INT | Number of days requested |
+| `model_version` | TEXT | e.g. `v2-Ridge-2026-02-24` |
+| `avg_prediction` | FLOAT | Mean of forecast_values |
+| `request_latency_ms` | FLOAT | End-to-end request latency |
+| `forecast_json` | TEXT | Full JSON array of daily values |
+
+DB writes are non-fatal — a connection failure logs a warning but does not fail the `/predict` response.
 
 ---
 
-## 🛠️ Troubleshooting
+## Model Performance
 
-### **Issue: Dataset not found**
-```
-FileNotFoundError: data/Online Retail.csv
-```
-**Solution**: Download the dataset and place it in `data/` folder (see Step 2)
+Results from the UCI Online Retail dataset run (February 2026):
 
-### **Issue: API returns 503 Service Unavailable**
-```
-{"detail": "Models not loaded"}
-```
-**Solution**: Run `python ml_engine.py` first to train and save models
+**Cross-validation benchmark** (TimeSeriesSplit, 5 folds):
 
-### **Issue: Dashboard shows "Data not available"**
-```
-Warning: Data not available. Please run ml_engine.py first.
-```
-**Solution**: Run Phase 2 (`python ml_engine.py`) to generate required CSV files
+| Model | RMSE (GBP) | MAPE (%) | R² |
+|-------|-----------|----------|-----|
+| Linear Regression | 6,274 | 14.08 | 0.791 |
+| **Ridge Regression** | **6,293** | **13.08** | **0.788** |
+| Random Forest | 8,528 | 14.74 | 0.599 |
 
-### **Issue: ModuleNotFoundError**
-```
-ModuleNotFoundError: No module named 'fastapi'
-```
-**Solution**: Install dependencies with `pip install -r requirements.txt`
-
-### **Issue: Port already in use**
-```
-ERROR: [Errno 48] Address already in use
-```
-**Solution**: Change port or kill existing process:
-```bash
-# Change port
-uvicorn app:app --port 8001
-
-# Or kill existing process (Linux/Mac)
-lsof -ti:8000 | xargs kill -9
-```
-
----
-
-
-## 🤝 Contributing
-
-This is an academic project. Suggestions and feedback are welcome!
-
-**Forking Guidelines:**
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/improvement`)
-3. Document your changes
-4. Submit a pull request
-
----
-
-## 🎯 Project Metrics
+**Holdout evaluation (last fold only):**
 
 | Metric | Value |
 |--------|-------|
-| **Lines of Code** | ~800 Python |
-| **Development Time** | 4 weeks (part-time) |
-| **API Endpoints** | 3 |
-| **ML Models** | 2 (K-Means + Random Forest) |
-| **Dashboard Tabs** | 2 |
-| **Test Coverage** | 0% (future improvement) |
+| RMSE | GBP 6,090 |
+| MAPE | 9.55% |
+| R² | 0.9355 |
+
+Ridge was selected as best model by MAPE. The higher R² on the holdout fold (vs CV average) indicates stable generalisation on the most recent time period.
 
 ---
 
+## Pipeline Design Decisions
 
-## 📚 References
+### No data leakage — TimeSeriesSplit
+Random `train_test_split` allows future data to leak into training (the model sees tomorrow to predict yesterday). `TimeSeriesSplit(n_splits=5)` always trains on the past and validates on the future, matching real deployment conditions.
 
-1. **Dataset**: Daqing Chen, Sai Liang Sain, and Kun Guo, "Online Retail Dataset", UCI Machine Learning Repository, 2015. DOI: 10.24432/C5BW33
+### MAPE as the primary selection metric
+MAPE is scale-independent: 10% error means the same whether daily sales are £1,000 or £100,000. It translates directly to business language and is easier to explain to non-technical stakeholders than RMSE.
 
-2. **RFM Analysis**: Hughes, A. M. (1994). Strategic database marketing. Chicago: Probus.
+### Soft price-validation guardrail
+Negative `UnitPrice` rows (< 1% of data) are dropped with a warning rather than a hard fail. Hard-failing on 2 rows out of 541,909 would block the entire pipeline for a known data-entry artefact in the UCI dataset that does not affect model integrity.
 
-3. **K-Means**: MacQueen, J. (1967). "Some methods for classification and analysis of multivariate observations". Proceedings of the Fifth Berkeley Symposium on Mathematical Statistics and Probability.
+### Log1p + StandardScaler for RFM clustering
+RFM distributions are heavily right-skewed due to whale customers. `log1p` compresses the long tail so K-Means Euclidean distance is not dominated by outlier monetary values; `StandardScaler` then equalises feature scales across Recency, Frequency, and Monetary.
 
-4. **Random Forest**: Breiman, L. (2001). "Random Forests". Machine Learning, 45(1), 5–32.
-
-5. **FastAPI Documentation**: https://fastapi.tiangolo.com/
-
-6. **Streamlit Documentation**: https://docs.streamlit.io/
-
----
-
-## ⭐ Acknowledgments
-
-- **UCI Machine Learning Repository** for providing the Online Retail Dataset
-- **FastAPI** and **Streamlit** communities for excellent documentation
-- **Academic Supervisor** for guidance and feedback
-- **Open-source community** for Python ML libraries
+### Ridge over bare Linear Regression
+Ridge (L2 regularisation) was selected by MAPE even though its RMSE was marginally higher. Regularisation reduces sensitivity to collinear lag features (Sales_Lag1, Sales_MA7, Sales_MA30), making the model more robust to slight distributional shifts without sacrificing predictive accuracy.
 
 ---
 
-**Last Updated**: December 2024  
-**Version**: 1.0.0  
-**Status**: ✅ Complete & Production-Ready
-5. **Model Evaluation**: MAE, RMSE, R² metrics
-6. **API Development**: Building REST APIs with FastAPI
-7. **Data Visualization**: Interactive dashboards with Streamlit and Plotly
-8. **Project Structure**: Organizing ML projects professionally
+## Dataset
 
-## 📚 Resources
+**Online Retail Dataset** — UCI Machine Learning Repository  
+Daqing Chen et al., 2012. DOI: 10.24432/C5BW33
 
-- [Online Retail Dataset](https://archive.ics.uci.edu/ml/datasets/online+retail)
-- [Scikit-learn Documentation](https://scikit-learn.org/stable/)
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
-- [Streamlit Documentation](https://docs.streamlit.io/)
+- ~541,909 transactions from a UK-based online retailer (2010–2011)
+- ~4,300 unique customers across 38 countries
+- 8 columns: InvoiceNo, StockCode, Description, Quantity, InvoiceDate, UnitPrice, CustomerID, Country
 
-## 👨‍💻 Author
+---
 
-[Sahil Garg](https://github.com/SahilGarg15)
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `FileNotFoundError: data/Online Retail.csv` | Dataset not placed | Download and save to `data/` (see Quickstart §3) |
+| `RuntimeError: Model not found at models/best_model.pkl` | Pipeline not run | Run `run_pipeline.py` first |
+| `ModuleNotFoundError: No module named 'X'` | Wrong venv active | Use `.\venv\Scripts\python.exe` explicitly |
+| API cell 10 — `ConnectionRefusedError` | Server not running | Start uvicorn in a separate terminal |
+| `TypeError: string indices must be integers` in notebook cell 10 | API returned error dict | Check server logs; add `r.raise_for_status()` |
+| Streamlit warning: `pandas<3 required` | Metadata mismatch | Upgrade: `pip install streamlit>=1.45 --upgrade` |
+
+---
+
+## References
+
+1. Chen, D. et al. (2012). *Data Mining for the Online Retail Industry*. Journal of Database Marketing & Customer Strategy Management. DOI: 10.24432/C5BW33
+2. Hughes, A. M. (1994). *Strategic Database Marketing*. Probus Publishing.
+3. Breiman, L. (2001). *Random Forests*. Machine Learning, 45(1), 5–32.
+4. Hoerl, A. E. & Kennard, R. W. (1970). *Ridge Regression*. Technometrics, 12(1).
+5. FastAPI documentation — https://fastapi.tiangolo.com
+6. Streamlit documentation — https://docs.streamlit.io
+7. Neon serverless PostgreSQL — https://neon.tech
+
+---
+
+**Version**: 2.0.0 · **Last updated**: February 2026 · **Status**: Production-ready

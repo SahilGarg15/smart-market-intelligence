@@ -1,0 +1,20 @@
+{
+  "Linear": {
+    "RMSE": 6274.73,
+    "MAPE": 14.08,
+    "R2": 0.7912,
+    "train_time_s": 0.019
+  },
+  "Ridge": {
+    "RMSE": 6292.69,
+    "MAPE": 13.08,
+    "R2": 0.7878,
+    "train_time_s": 0.014
+  },
+  "RandomForest": {
+    "RMSE": 8528.42,
+    "MAPE": 14.74,
+    "R2": 0.5989,
+    "train_time_s": 1.187
+  }
+}

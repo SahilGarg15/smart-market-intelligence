@@ -25,7 +25,7 @@ pip-delete-this-directory.txt
 # Jupyter Notebook
 # ========================================
 .ipynb_checkpoints/
-*.ipynb
+# pipeline_notebook.ipynb is tracked intentionally
 
 # ========================================
 # Data Files (Keep only README.md)
