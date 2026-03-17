@@ -368,6 +368,139 @@ def get_metadata():
     return STATE["metadata"]
 
 
+@app.get("/metrics")
+def get_metrics():
+    """
+    Compute and return all business metrics.
+
+    Reads daily_sales.csv and customer_segments.csv, then computes:
+      • Revenue metrics (growth, moving averages)
+      • Customer metrics (retention, active customers)
+      • Sales metrics (AOV, total orders)
+      • Segmentation metrics (revenue by segment, top-20% contribution)
+    """
+    try:
+        from pipeline.business_metrics import compute_all_metrics
+        return compute_all_metrics()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Metrics computation failed: {exc}",
+        )
+
+
+@app.get("/insights")
+def get_insights():
+    """
+    Generate rule-based business insights from computed metrics.
+
+    Pipeline: data → metrics → insight rules → actionable recommendations.
+    No LLM involved — fast, deterministic, and auditable.
+    """
+    try:
+        from pipeline.business_metrics import compute_all_metrics
+        from pipeline.insight_engine import generate_insights
+
+        metrics = compute_all_metrics()
+        return generate_insights(metrics)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Insights generation failed: {exc}",
+        )
+
+
+@app.post("/segment")
+def segment_customer(request: dict):
+    """
+    Predict customer segment from RFM values.
+
+    The dashboard sends: {"Recency": float, "Frequency": float, "Monetary": float}
+    Returns: {"cluster_id": int, "segment_name": str}
+    """
+    import os
+
+    kmeans_path = "models/kmeans_model.pkl"
+    scaler_path = "models/scaler.pkl"
+
+    if not os.path.exists(kmeans_path):
+        raise HTTPException(status_code=503, detail="K-Means model not found.")
+
+    try:
+        kmeans = joblib.load(kmeans_path)
+
+        features = np.array([[
+            request.get("Recency", 0),
+            request.get("Frequency", 0),
+            request.get("Monetary", 0),
+        ]])
+
+        # Scale if scaler exists (trained with StandardScaler)
+        if os.path.exists(scaler_path):
+            scaler = joblib.load(scaler_path)
+            features = scaler.transform(features)
+
+        cluster_id = int(kmeans.predict(features)[0])
+
+        segment_map = {0: "Loyal", 1: "At-Risk", 2: "Whale"}
+        segment_name = segment_map.get(cluster_id, f"Segment {cluster_id}")
+
+        return {
+            "cluster_id": cluster_id,
+            "segment_name": segment_name,
+            "input": {
+                "Recency": request.get("Recency"),
+                "Frequency": request.get("Frequency"),
+                "Monetary": request.get("Monetary"),
+            },
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Segmentation failed: {exc}")
+
+
+@app.get("/forecast/{days}")
+def forecast_sales(days: int = 7):
+    """
+    Generate a multi-day sales forecast.
+
+    Returns predictions in the format the dashboard expects:
+      {"forecast_days": N, "predictions": [{"date": "...", "predicted_sales": ...}, ...]}
+    """
+    model = STATE["model"]
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model not loaded.")
+
+    feature_cols = STATE["feature_cols"]
+    if not feature_cols:
+        raise HTTPException(status_code=503, detail="Feature columns not configured.")
+
+    try:
+        X = _build_inference_features(days, feature_cols)
+        preds = model.predict(X).tolist()
+        preds = [max(0.0, round(v, 2)) for v in preds]
+
+        future_dates = pd.date_range(
+            start=datetime.today(), periods=days, freq="D"
+        )
+
+        predictions = [
+            {"date": d.strftime("%Y-%m-%d"), "predicted_sales": p}
+            for d, p in zip(future_dates, preds)
+        ]
+
+        return {
+            "forecast_days": days,
+            "predictions": predictions,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Forecast failed: {exc}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api.app:app", host="0.0.0.0", port=8000, reload=True)
+

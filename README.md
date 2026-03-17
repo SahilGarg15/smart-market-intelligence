@@ -38,13 +38,15 @@ pipeline/error_analysis.py         ← feature importance + residual charts
 ```
 market-intel/
 │
-├── pipeline/                          # Training pipeline (6 modules)
+├── pipeline/                          # Training pipeline & analytics (8 modules)
 │   ├── data_validation.py             # Load CSV + 4 fail-fast guardrails
 │   ├── feature_engineering.py         # RFM, daily aggregation, lag/rolling features
 │   ├── model_benchmark.py             # Benchmark 3 models with TimeSeriesSplit
 │   ├── hyperparameter_tuning.py       # GridSearchCV on Random Forest
 │   ├── model_selection.py             # Pick best by MAPE, serialize model
 │   ├── error_analysis.py              # Feature importance + residual analysis
+│   ├── business_metrics.py            # Computes 15 business KPIs (revenue, RFM, etc.)
+│   ├── insight_engine.py              # Rule-based business insights generator
 │   └── __init__.py
 │
 ├── api/
@@ -202,6 +204,10 @@ Base URL: `http://127.0.0.1:8000`
 | `GET` | `/benchmark` | Per-model CV results (RMSE, MAPE, R²) |
 | `GET` | `/metadata` | Full training audit record |
 | `GET` | `/drift` | Rolling mean vs training baseline |
+| `GET` | `/metrics` | Computes and returns 15 business KPIs |
+| `GET` | `/insights` | Returns rule-based business insights |
+| `POST` | `/segment` | Predicts customer segment from RFM values |
+| `GET` | `/forecast/{days}` | Multi-day sales forecast |
 
 ### POST /predict
 
